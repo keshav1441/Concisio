@@ -36,7 +36,7 @@ if 'filtered_messages' not in st.session_state:
 
 # Page config
 st.set_page_config(page_title="Chat Demo", layout="wide")
-st.title("Chat Demo")
+st.title("Concisio - Chat summarization and Insights")
 
 # Function to manage WebSocket connection
 def manage_websocket():
@@ -69,11 +69,10 @@ if not st.session_state.ws_connected and st.session_state.ws_thread is None:
     st.session_state.ws_thread.start()
 
 # Function to update chat display efficiently with scrollable container
-# Function to update chat display efficiently with scrollable container
 def update_chat_display():
     with chat_container:
-        # Clear previous messages
-        st.empty()
+        # Clear the container before displaying messages
+        chat_container.empty()
         
         # Display each message in the chat
         messages_to_display = st.session_state.filtered_messages if st.session_state.filtered_messages else st.session_state.messages
@@ -88,8 +87,7 @@ def update_chat_display():
                 if (container) {
                     container.scrollTop = container.scrollHeight;
                 }
-            </script>
-        """, unsafe_allow_html=True)
+            </script>""", unsafe_allow_html=True)
 
 # Sidebar with restored functionality
 with st.sidebar:
@@ -178,8 +176,7 @@ with st.sidebar:
                 st.error(f"Error: {str(e)}")
 
 # Main chat interface
-st.write("### Chat Messages")
-chat_container = st.container(height=500)  # Scrollable container
+chat_container = st.container(height=390)  # Scrollable container
 update_chat_display()
 
 # Chat input at the bottom
@@ -197,43 +194,16 @@ async def send_message_async(message):
         st.error(f"Network error: {str(e)}")
         return None
 
-# Chat input at the bottom
-async def handle_chat_input():
-    if prompt := st.chat_input("Type your message here"):
-        current_time = time.time()
-        if current_time - st.session_state.last_request_time < DEBOUNCE_TIME:
-            st.warning("Please wait a moment before sending another message...")
-            return
-        st.session_state.last_request_time = current_time
-        
-        message = {
-            "conversation_id": st.session_state.conversation_id,
-            "user_id": st.session_state.user_id,
-            "message": prompt,
-            "timestamp": datetime.now().isoformat(),
-            "metadata": {}
-        }
-        
-        st.session_state.messages.append(message)
-        update_chat_display()
-        
-        message_id = f"{st.session_state.conversation_id}_{len(st.session_state.messages)}"
-        st.session_state.message_cache[message_id] = message
-        
-        bot_response = await send_message_async(message)
-        if bot_response:
-            st.session_state.messages.append(bot_response)
-            if message_id in st.session_state.message_cache:
-                del st.session_state.message_cache[message_id]
-            update_chat_display()
+# Top-level chat input with unique key (only call it ONCE)
+prompt = st.chat_input("Type your message here", key="chat_input_box")
 
-# Handle chat input
-if prompt := st.chat_input("Type your message here"):
+if prompt:
     current_time = time.time()
     if current_time - st.session_state.last_request_time < DEBOUNCE_TIME:
         st.warning("Please wait a moment before sending another message...")
     else:
         st.session_state.last_request_time = current_time
+
         message = {
             "conversation_id": st.session_state.conversation_id,
             "user_id": st.session_state.user_id,
@@ -241,11 +211,13 @@ if prompt := st.chat_input("Type your message here"):
             "timestamp": datetime.now().isoformat(),
             "metadata": {}
         }
+
         st.session_state.messages.append(message)
         update_chat_display()
+
         message_id = f"{st.session_state.conversation_id}_{len(st.session_state.messages)}"
         st.session_state.message_cache[message_id] = message
-        
+
         async def process_message():
             bot_response = await send_message_async(message)
             if bot_response:
@@ -253,8 +225,9 @@ if prompt := st.chat_input("Type your message here"):
                 if message_id in st.session_state.message_cache:
                     del st.session_state.message_cache[message_id]
                 update_chat_display()
-        
+
         asyncio.run(process_message())
+
 
 # Connection status
 st.sidebar.markdown("---")
