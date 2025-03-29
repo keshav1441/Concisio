@@ -3,91 +3,49 @@ import requests
 import json
 from datetime import datetime
 import asyncio
-import websockets
 from collections import defaultdict
-import threading
 import time
 import aiohttp
 
-# Configure the API URL and WebSocket URL
+# Page config must be first
+st.set_page_config(page_title="Chat Demo", layout="wide")
+st.title("Chat Demo")
+
+# Configure the API URL
 API_URL = "http://localhost:8000"
-WS_URL = "ws://localhost:8000/ws"
 
 # Configure request debouncing
 DEBOUNCE_TIME = 0.2
 
 # Initialize session state
-if 'messages' not in st.session_state:
-    st.session_state.messages = []
-if 'message_cache' not in st.session_state:
-    st.session_state.message_cache = {}
 if 'conversation_id' not in st.session_state:
     st.session_state.conversation_id = datetime.now().strftime("%Y%m%d%H%M%S")
+
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
+    # Load existing messages from backend when initializing
+    async def load_messages():
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{API_URL}/chats/{st.session_state.conversation_id}") as response:
+                    if response.status == 200:
+                        messages = await response.json()
+                        st.session_state.messages = messages
+        except Exception as e:
+            st.error(f"Error loading messages: {str(e)}")
+    
+    asyncio.run(load_messages())
+
+if 'message_cache' not in st.session_state:
+    st.session_state.message_cache = {}
 if 'user_id' not in st.session_state:
     st.session_state.user_id = "demo_user"
-if 'ws_connected' not in st.session_state:
-    st.session_state.ws_connected = False
 if 'last_request_time' not in st.session_state:
     st.session_state.last_request_time = 0
-if 'ws_thread' not in st.session_state:
-    st.session_state.ws_thread = None
 if 'filtered_messages' not in st.session_state:
     st.session_state.filtered_messages = []
-
-# Page config
-st.set_page_config(page_title="Chat Demo", layout="wide")
-st.title("Concisio - Chat summarization and Insights")
-
-# Function to manage WebSocket connection
-def manage_websocket():
-    async def connect_and_listen():
-        try:
-            uri = f"{WS_URL}/{st.session_state.conversation_id}"
-            async with websockets.connect(uri) as websocket:
-                st.session_state.ws_connected = True
-                while True:
-                    try:
-                        data = await websocket.recv()
-                        message_data = json.loads(data)
-                        st.session_state.messages.append(message_data)
-                        update_chat_display()
-                    except websockets.exceptions.ConnectionClosed:
-                        st.session_state.ws_connected = False
-                        break
-                    except Exception as e:
-                        st.error(f"WebSocket error: {str(e)}")
-                        break
-        except Exception as e:
-            st.session_state.ws_connected = False
-            st.error(f"WebSocket connection error: {str(e)}")
-
-    asyncio.run(connect_and_listen())
-
-# Initialize WebSocket connection
-if not st.session_state.ws_connected and st.session_state.ws_thread is None:
-    st.session_state.ws_thread = threading.Thread(target=manage_websocket, daemon=True)
-    st.session_state.ws_thread.start()
-
-# Function to update chat display efficiently with scrollable container
-def update_chat_display():
-    with chat_container:
-        # Clear the container before displaying messages
-        chat_container.empty()
-        
-        # Display each message in the chat
-        messages_to_display = st.session_state.filtered_messages if st.session_state.filtered_messages else st.session_state.messages
-        for msg in messages_to_display:
-            with st.chat_message("user" if msg["user_id"] == st.session_state.user_id else "assistant"):
-                st.write(msg["message"])
-        
-        # Scroll to bottom after rendering messages
-        st.markdown("""
-            <script>
-                const container = window.parent.document.querySelector(".stContainer [data-testid='stVerticalBlock'] > div:last-child");
-                if (container) {
-                    container.scrollTop = container.scrollHeight;
-                }
-            </script>""", unsafe_allow_html=True)
+if 'last_message_count' not in st.session_state:
+    st.session_state.last_message_count = 0
 
 # Sidebar with restored functionality
 with st.sidebar:
@@ -99,11 +57,6 @@ with st.sidebar:
         st.session_state.conversation_id = datetime.now().strftime("%Y%m%d%H%M%S")
         st.session_state.messages = []
         st.session_state.filtered_messages = []
-        st.session_state.ws_connected = False
-        if st.session_state.ws_thread:
-            st.session_state.ws_thread.join()
-        st.session_state.ws_thread = threading.Thread(target=manage_websocket, daemon=True)
-        st.session_state.ws_thread.start()
         st.rerun()
     
     # Restored Search and Filter Section
@@ -176,7 +129,18 @@ with st.sidebar:
                 st.error(f"Error: {str(e)}")
 
 # Main chat interface
-chat_container = st.container(height=390)  # Scrollable container
+st.write("### Chat Messages")
+chat_container = st.empty()  # Use empty container for efficient updates
+
+# Function to update chat display efficiently
+def update_chat_display():
+    with chat_container.container():
+        messages_to_display = st.session_state.filtered_messages if st.session_state.filtered_messages else st.session_state.messages
+        for msg in messages_to_display:
+            with st.chat_message("user" if msg["user_id"] == st.session_state.user_id else "assistant"):
+                st.write(msg["message"])
+
+# Initial display
 update_chat_display()
 
 # Chat input at the bottom
@@ -194,16 +158,13 @@ async def send_message_async(message):
         st.error(f"Network error: {str(e)}")
         return None
 
-# Top-level chat input with unique key (only call it ONCE)
-prompt = st.chat_input("Type your message here", key="chat_input_box")
-
-if prompt:
+# Handle chat input
+if prompt := st.chat_input("Type your message here"):
     current_time = time.time()
     if current_time - st.session_state.last_request_time < DEBOUNCE_TIME:
         st.warning("Please wait a moment before sending another message...")
     else:
         st.session_state.last_request_time = current_time
-
         message = {
             "conversation_id": st.session_state.conversation_id,
             "user_id": st.session_state.user_id,
@@ -211,13 +172,11 @@ if prompt:
             "timestamp": datetime.now().isoformat(),
             "metadata": {}
         }
-
         st.session_state.messages.append(message)
         update_chat_display()
-
         message_id = f"{st.session_state.conversation_id}_{len(st.session_state.messages)}"
         st.session_state.message_cache[message_id] = message
-
+        
         async def process_message():
             bot_response = await send_message_async(message)
             if bot_response:
@@ -225,20 +184,12 @@ if prompt:
                 if message_id in st.session_state.message_cache:
                     del st.session_state.message_cache[message_id]
                 update_chat_display()
-
+        
         asyncio.run(process_message())
 
-
-# Connection status
+# Status information
 st.sidebar.markdown("---")
-st.sidebar.markdown(f"**Conversation ID:** {st.session_state.conversation_id}")
-st.sidebar.markdown(f"**Total Messages:** {len(st.session_state.messages)}")
+st.sidebar.markdown(f"*Conversation ID:* {st.session_state.conversation_id}")
+st.sidebar.markdown(f"*Total Messages:* {len(st.session_state.messages)}")
 if st.session_state.filtered_messages:
-    st.sidebar.markdown(f"**Filtered Messages:** {len(st.session_state.filtered_messages)}")
-st.sidebar.markdown(f"**Status:** {'✅ Connected' if st.session_state.ws_connected else '❌ Disconnected'}")
-if not st.session_state.ws_connected:
-    if st.sidebar.button("Reconnect"):
-        if st.session_state.ws_thread:
-            st.session_state.ws_thread.join()
-        st.session_state.ws_thread = threading.Thread(target=manage_websocket, daemon=True)
-        st.session_state.ws_thread.start()
+    st.sidebar.markdown(f"*Filtered Messages:* {len(st.session_state.filtered_messages)}")

@@ -70,7 +70,7 @@ async def delete_conversation(conversation_id: str):
 # WebSocket endpoint for real-time chat
 @router.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
-    await websocket.accept()
+    await websocket_manager.connect(websocket, client_id)
     try:
         while True:
             # Receive message from client
@@ -78,10 +78,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             
             # Create chat message
             message = ChatMessage(**data)
-            saved_message = await chat_service.create_message(message)
             
-            # Send confirmation back to client
-            await websocket.send_json(saved_message.model_dump())
+            # Broadcast the message to all connected clients in the conversation
+            await websocket_manager.broadcast_message(message, client_id)
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(websocket, client_id)
+        await websocket.close()
+    except Exception as e:
+        websocket_manager.disconnect(websocket, client_id)
+        await websocket.close(code=1001, reason=str(e))
     except WebSocketDisconnect:
         await websocket.close()
     except Exception as e:
