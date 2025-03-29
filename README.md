@@ -23,7 +23,7 @@ A powerful platform that combines a FastAPI backend with a Streamlit frontend to
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/yourusername/concisio.git
+   git clone https://github.com/keshav1441/concisio.git
    cd concisio
    ```
 
