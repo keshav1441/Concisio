@@ -102,7 +102,6 @@ Once the backend is running, access the interactive API documentation at:
    ```env
    MONGODB_URL=your_mongodb_connection_string
    GOOGLE_API_KEY=your_google_api_key
-   JWT_SECRET=your_jwt_secret
    ```
 
 2. Build the Docker image:
